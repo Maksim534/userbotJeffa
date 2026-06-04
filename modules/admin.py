@@ -6,15 +6,65 @@ from module_manager import install_module_from_url, uninstall_module, get_all_mo
 __info__ = {
     "name": "admin",
     "version": "1.0",
-    "author": "catastrophe",
-    "description": "Управление модулями"
+    "author": "Alpha",
+    "description": "Управление модулями и справка"
+}
+
+# Словарь с описаниями команд для .help
+COMMANDS_INFO = {
+    "ping": "Проверка работы бота и аптайм",
+    "dlmod": "Скачать и установить модуль по ссылке",
+    "modules": "Список установленных модулей",
+    "unload": "Удалить модуль по имени",
+    "reload": "Перезагрузить все модули",
+    "help": "Показать справку по командам или модулю"
 }
 
 async def __setup__(client, commands_registry, handlers_registry):
+    commands_registry["ping"] = ping_command
     commands_registry["dlmod"] = dlmod_command
     commands_registry["modules"] = modules_command
     commands_registry["unload"] = unload_command
     commands_registry["reload"] = reload_command
+    commands_registry["help"] = help_command
+    
+    print("✅ Админ-модуль загружен")
+
+async def help_command(event):
+    """Показывает справку по командам"""
+    args = event.message.text.split()
+    
+    # Если указан конкретный модуль: .help ping
+    if len(args) > 1:
+        module_name = args[1].lower()
+        if module_name in COMMANDS_INFO:
+            await event.reply(f"📖 **{module_name}**\n└ {COMMANDS_INFO[module_name]}")
+        else:
+            await event.reply(f"❌ Модуль `{module_name}` не найден")
+        return
+    
+    # Общая справка: список всех команд
+    msg = "📚 **Справка по командам**\n\n"
+    
+    for cmd, desc in COMMANDS_INFO.items():
+        msg += f"• **{cmd}** — {desc}\n"
+    
+    msg += "\n📌 **Примеры использования:**\n"
+    msg += "• `.help ping` — подробно о команде ping\n"
+    msg += "• `.dlmod https://ссылка` — установить модуль\n"
+    msg += "• `.modules` — список модулей"
+    
+    await event.reply(msg)
+
+# Остальные команды без изменений
+async def ping_command(event):
+    import time
+    from datetime import datetime
+    start_time = time.time()
+    msg = await event.reply("🏓 Измеряю пинг...")
+    end_time = time.time()
+    ping_ms = int((end_time - start_time) * 1000)
+    await msg.edit(f"🏓 **Pong!**\n📡 Пинг: `{ping_ms} мс`\n⏱️ Аптайм: бот работает")
 
 async def dlmod_command(event):
     args = event.message.text.split()
