@@ -17,11 +17,12 @@ from module_manager import (
 
 __info__ = {
     "name": "admin",
-    "version": "1.2",
+    "version": "1.3",
     "author": "Alpha",
     "description": "Управление модулями и справка"
 }
 
+# Словарь с описаниями команд будет динамически обновляться
 COMMANDS_INFO = {
     "ping": "Проверка работы бота и аптайм",
     "dlmod": "Скачать и установить модуль по ссылке или из реплая на файл",
@@ -38,16 +39,29 @@ async def __setup__(client, commands_registry, handlers_registry):
     commands_registry["unload"] = unload_command
     commands_registry["reload"] = reload_command
     commands_registry["help"] = help_command
-    print("✅ Админ-модуль загружен (режим редактирования)")
+    print("✅ Админ-модуль загружен")
 
 async def edit_or_reply(event, text):
-    """Отправляет новое сообщение или редактирует существующее"""
     if hasattr(event, 'message') and event.message.out:
-        # Если это наше сообщение — редактируем
         return await event.edit(text)
     else:
-        # Иначе отправляем новое
         return await event.reply(text)
+
+async def update_help_cache():
+    """Обновляет кэш команд для .help из загруженных модулей"""
+    global COMMANDS_INFO
+    # Сохраняем базовые команды
+    base_commands = ["ping", "dlmod", "modules", "unload", "reload", "help"]
+    
+    # Получаем команды из loader
+    for cmd_name in loader.commands:
+        if cmd_name not in COMMANDS_INFO and cmd_name not in base_commands:
+            COMMANDS_INFO[cmd_name] = "Команда из загруженного модуля"
+    
+    # Удаляем команды, которых больше нет
+    for cmd_name in list(COMMANDS_INFO.keys()):
+        if cmd_name not in base_commands and cmd_name not in loader.commands:
+            del COMMANDS_INFO[cmd_name]
 
 async def install_module_from_file(file_path, filename):
     dest_path = MODULES_DIR / filename
@@ -71,7 +85,11 @@ async def dlmod_command(event):
         except:
             pass
         if result["success"]:
-            await msg.edit(f"✅ Модуль `{result['filename']}` установлен!\n🔄 Введи `.reload`")
+            await msg.edit(f"✅ Модуль `{result['filename']}` установлен!\n🔄 Автоматически перезагружаю...")
+            # Автоматическая перезагрузка
+            await loader.reload_all_modules(event.client, loader.commands)
+            await update_help_cache()
+            await msg.edit(f"✅ Модуль `{result['filename']}` установлен и активирован!\n📋 Используй `.help` для списка команд")
         else:
             await msg.edit(f"❌ Ошибка: {result.get('error')}")
         return
@@ -98,7 +116,10 @@ async def dlmod_command(event):
         except:
             pass
         if installed:
-            await msg.edit(f"✅ Установлены:\n" + "\n".join([f"• `{m}`" for m in installed]) + f"\n\n🔄 Введи `.reload`")
+            await msg.edit(f"✅ Установлены модули:\n" + "\n".join([f"• `{m}`" for m in installed]) + f"\n\n🔄 Автоматически перезагружаю...")
+            await loader.reload_all_modules(event.client, loader.commands)
+            await update_help_cache()
+            await msg.edit(f"✅ Установлено {len(installed)} модулей!\n📋 Используй `.help` для списка команд")
         else:
             await msg.edit("❌ В архиве нет .py файлов")
         return
@@ -114,30 +135,44 @@ async def dlmod_command(event):
     result = install_module_from_url(url)
     if result["success"]:
         if result["type"] == "single":
-            await msg.edit(f"✅ Модуль `{result['filename']}` установлен!\n🔄 Введи `.reload`")
+            await msg.edit(f"✅ Модуль `{result['filename']}` установлен!\n🔄 Автоматически перезагружаю...")
         else:
-            await msg.edit(f"✅ Установлены: {', '.join(result.get('filenames', []))}\n🔄 Введи `.reload`")
+            await msg.edit(f"✅ Установлены: {', '.join(result.get('filenames', []))}\n🔄 Автоматически перезагружаю...")
+        
+        await loader.reload_all_modules(event.client, loader.commands)
+        await update_help_cache()
+        await msg.edit(f"✅ Модуль установлен и активирован!\n📋 Используй `.help` для списка команд")
     else:
         await msg.edit(f"❌ Ошибка: {result.get('error')}")
 
 async def help_command(event):
     msg = await edit_or_reply(event, "📚 Загрузка справки...")
+    await update_help_cache()  # Обновляем кэш перед показом
+    
     args = event.message.text.split()
     if len(args) > 1:
-        module_name = args[1].lower()
-        if module_name in COMMANDS_INFO:
-            await msg.edit(f"📖 **{module_name}**\n└ {COMMANDS_INFO[module_name]}")
+        cmd_name = args[1].lower()
+        if cmd_name in COMMANDS_INFO:
+            await msg.edit(f"📖 **{cmd_name}**\n└ {COMMANDS_INFO[cmd_name]}")
+        elif cmd_name in loader.commands:
+            await msg.edit(f"📖 **{cmd_name}**\n└ Команда из загруженного модуля")
         else:
-            await msg.edit(f"❌ Модуль `{module_name}` не найден")
+            await msg.edit(f"❌ Команда `{cmd_name}` не найдена")
         return
     
-    help_text = "📚 **Справка по командам**\n\n"
+    help_text = "📚 **Доступные команды:**\n\n"
     for cmd, desc in COMMANDS_INFO.items():
         help_text += f"• **{cmd}** — {desc}\n"
-    help_text += "\n📌 **Примеры:**\n"
-    help_text += "• `.help ping`\n"
-    help_text += "• `.dlmod https://ссылка`\n"
-    help_text += "• _реплай на .py файл + .dlmod_"
+    
+    # Добавляем команды из модулей, которых нет в COMMANDS_INFO
+    for cmd in loader.commands:
+        if cmd not in COMMANDS_INFO:
+            help_text += f"• **{cmd}** — Команда из модуля\n"
+    
+    help_text += "\n📌 **Как установить модуль:**\n"
+    help_text += "• По ссылке: `.dlmod https://ссылка/модуль.py`\n"
+    help_text += "• Из файла: отправь `.py` файл, сделай реплай и напиши `.dlmod`"
+    
     await msg.edit(help_text)
 
 async def modules_command(event):
@@ -159,20 +194,24 @@ async def unload_command(event):
         await msg.edit("❌ Укажи имя модуля\nПример: `.unload ping`")
         return
     if uninstall_module(args[1]):
-        await msg.edit(f"✅ Модуль `{args[1]}` удалён\n🔄 Введи `.reload`")
+        await msg.edit(f"✅ Модуль `{args[1]}` удалён\n🔄 Перезагружаю...")
+        await loader.reload_all_modules(event.client, loader.commands)
+        await update_help_cache()
+        await msg.edit(f"✅ Модуль `{args[1]}` удалён! Используй `.help` для обновлённого списка")
     else:
         await msg.edit("❌ Модуль не найден")
 
 async def reload_command(event):
     msg = await edit_or_reply(event, "🔄 Перезагрузка...")
     await loader.reload_all_modules(event.client, loader.commands)
-    await msg.edit(f"✅ Перезагружено {len(loader.commands)} команд!")
+    await update_help_cache()
+    await msg.edit(f"✅ Перезагружено {len(loader.commands)} команд!\n📋 Используй `.help` для списка")
 
 async def ping_command(event):
     msg = await edit_or_reply(event, "🏓 Измеряю пинг...")
-    start_time = time.time()
-    end_time = time.time()
-    ping_ms = int((end_time - start_time) * 1000)
+    start_ping = time.time()
+    end_ping = time.time()
+    ping_ms = int((end_ping - start_ping) * 1000)
     
     uptime_seconds = time.time() - start_time
     days = int(uptime_seconds // 86400)
@@ -193,5 +232,10 @@ async def ping_command(event):
         f"🏓 **Pong!**\n\n"
         f"📡 **Пинг:** `{ping_ms} мс`\n"
         f"⏱️ **Аптайм:** `{uptime_str}`\n"
+        f"📦 **Модулей:** {len(get_all_modules())}\n"
+        f"🔧 **Команд:** {len(loader.commands)}\n"
         f"💖 **Статус:** ✅ Работаю"
     )
+
+# Время старта для ping
+start_time = time.time()
