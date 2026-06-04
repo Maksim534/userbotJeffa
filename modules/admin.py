@@ -1,110 +1,68 @@
-# userbot/modules/admin.py
+# userbotJeffa/modules/admin.py
 import time
-from datetime import datetime
 import loader
-from module_manager import get_all_modules, get_module_info, MODULES_DIR
+from module_manager import get_all_modules, get_module_info
 
-__info__ = {
-    "name": "Admin",
-    "version": "1.0",
-    "author": "Alpha",
-    "description": "Управление юзерботом"
-}
+__version__ = (1, 0, 0)
 
-# Стартовое время для аптайма
-START_TIME = time.time()
-
-async def __setup__(client, commands_registry, handlers_registry):
-    commands_registry["help"] = help_command
-    commands_registry["ping"] = ping_command
-    commands_registry["reload"] = reload_command
-    commands_registry["modules"] = modules_command
-    print("✅ Админ-модуль загружен (как Hikka)")
-
-def format_uptime(seconds):
-    """Форматирует аптайм в формат Hikka"""
-    hours = int(seconds // 3600)
-    minutes = int((seconds % 3600) // 60)
-    secs = int(seconds % 60)
-    return f"{hours:02d}:{minutes:02d}:{secs:02d}"
-
-def collect_commands_by_module():
-    """Собирает все команды, сгруппированные по модулям"""
-    modules_commands = {}
+class Mod(loader.Module):
+    strings = {"name": "Admin"}
     
-    # Проходим по всем загруженным модулям
-    for module_name in get_all_modules():
-        module_path = MODULES_DIR / f"{module_name}.py"
-        if not module_path.exists():
-            continue
+    async def client_ready(self, client, db):
+        self.start_time = time.time()
+    
+    async def inlyhelp(self, message):
+        """Показать справку по командам"""
+        args = loader.utils.get_args_raw(message)
         
-        # Пытаемся получить информацию о командах из модуля
-        try:
-            import importlib.util
-            spec = importlib.util.spec_from_file_location(module_name, module_path)
-            module = importlib.util.module_from_spec(spec)
-            spec.loader.exec_module(module)
-            
-            # Если у модуля есть функция get_commands_info
-            if hasattr(module, "get_commands_info"):
-                commands_info = module.get_commands_info()
-                if commands_info:
-                    modules_commands[module_name] = commands_info
-        except:
-            pass
+        if args:
+            cmd_name = args.lower()
+            if cmd_name in loader.commands:
+                await loader.utils.answer(message, f"📖 **{cmd_name}**\n└ Команда доступна")
+            else:
+                await loader.utils.answer(message, f"❌ Команда `{cmd_name}` не найдена")
+            return
+        
+        # Группируем команды по модулям
+        modules_cmds = {}
+        for cmd in loader.commands:
+            modules_cmds.setdefault("Core", []).append(cmd)
+        
+        result = f"🌘 {len(modules_cmds)} mods available, {len(loader.commands)} commands:\n\n"
+        for mod_name, cmds in modules_cmds.items():
+            result += f"▪️ {mod_name}: ( " + " | ".join([f".{c}" for c in cmds]) + " )\n"
+        
+        await loader.utils.answer(message, result)
     
-    return modules_commands
-
-async def help_command(event):
-    """Показывает справку как в Hikka"""
-    msg = await event.reply("📚 Загрузка справки...")
+    async def inlyping(self, message):
+        """Проверить пинг и аптайм"""
+        start = time.time()
+        msg = await loader.utils.answer(message, "🏓 Понг...")
+        end = time.time()
+        
+        ping_ms = int((end - start) * 1000)
+        uptime_seconds = time.time() - self.start_time
+        hours = int(uptime_seconds // 3600)
+        minutes = int((uptime_seconds % 3600) // 60)
+        secs = int(uptime_seconds % 60)
+        
+        uptime_str = f"{hours:02d}:{minutes:02d}:{secs:02d}"
+        
+        await msg.edit(f"⚡️ Telegram ping: {ping_ms} ms\n🚀 Uptime: {uptime_str}")
     
-    modules_commands = collect_commands_by_module()
+    async def inlyreload(self, message):
+        """Перезагрузить все модули"""
+        await loader.utils.answer(message, "🔄 Перезагрузка...")
+        await loader.reload_all_modules(self.client)
+        await message.reply(f"✅ Перезагружено {len(loader.commands)} команд!")
     
-    if not modules_commands:
-        await msg.edit("❌ Нет загруженных модулей")
-        return
-    
-    # Подсчёт общего количества команд
-    total_commands = sum(len(cmds) for cmds in modules_commands.values())
-    
-    result = f"🌘 {len(modules_commands)} mods available, {total_commands} commands:\n\n"
-    
-    for module_name, commands in modules_commands.items():
-        # Красивое название модуля
-        display_name = module_name.capitalize()
-        cmd_list = " | ".join([f".{cmd}" for cmd in commands])
-        result += f"▪️ {display_name}: ( {cmd_list} )\n"
-    
-    await msg.edit(result)
-
-async def ping_command(event):
-    """Показывает пинг и аптайм как в Hikka"""
-    start = time.time()
-    msg = await event.reply("🏓 Понг...")
-    end = time.time()
-    
-    ping_ms = int((end - start) * 1000)
-    uptime_str = format_uptime(time.time() - START_TIME)
-    
-    result = f"⚡️ Telegram ping: {ping_ms} ms\n🚀 Uptime: {uptime_str}"
-    await msg.edit(result)
-
-async def reload_command(event):
-    """Перезагружает все модули"""
-    msg = await event.reply("🔄 Перезагрузка...")
-    await loader.reload_all_modules(event.client, loader.commands)
-    await msg.edit("✅ Перезагружено!")
-
-async def modules_command(event):
-    """Список модулей"""
-    modules = get_all_modules()
-    if not modules:
-        await event.reply("📦 Нет модулей")
-        return
-    result = "📦 **Модули:**\n\n"
-    for mod in modules:
-        info = get_module_info(mod)
-        version = info.get('version', '1.0')
-        result += f"• `{mod}` v{version}\n"
-    await event.reply(result)
+    async def inlymodules(self, message):
+        """Список установленных модулей"""
+        modules = get_all_modules()
+        if not modules:
+            await loader.utils.answer(message, "📦 Нет модулей")
+            return
+        result = "📦 **Модули:**\n\n"
+        for mod in modules:
+            result += f"• `{mod}`\n"
+        await loader.utils.answer(message, result)
